@@ -36,8 +36,13 @@ public class ScreenRecordService extends Service {
     public static final String ACTION_RESUME = "com.chasmet.camlivedirect.RESUME_RECORD";
     public static final String EXTRA_RESULT_CODE = "result_code";
     public static final String EXTRA_RESULT_DATA = "result_data";
+
     public static final String PREFS = "cam_live_prefs";
     public static final String KEY_LAST_VIDEO_URI = "last_video_uri";
+    public static final String KEY_RECORDING_ACTIVE = "recording_active";
+    public static final String KEY_RECORDING_PAUSED = "recording_paused";
+    public static final String KEY_RECORDING_STARTED_AT = "recording_started_at";
+    public static final String KEY_RECORDING_ELAPSED_MS = "recording_elapsed_ms";
 
     private static final String CHANNEL_ID = "cam_live_record";
     private static final int NOTIFICATION_ID = 10;
@@ -47,6 +52,8 @@ public class ScreenRecordService extends Service {
     private MediaRecorder mediaRecorder;
     private VirtualDisplay virtualDisplay;
     private boolean isPaused = false;
+    private long startedAt = 0L;
+    private long elapsedBeforePause = 0L;
     private Uri currentVideoUri;
     private ParcelFileDescriptor outputDescriptor;
     private File legacyOutputFile;
@@ -75,7 +82,7 @@ public class ScreenRecordService extends Service {
             return START_STICKY;
         }
 
-        Notification notification = buildRecordingNotification("Enregistrement en cours");
+        Notification notification = buildRecordingNotification("REC 00:00");
         if (Build.VERSION.SDK_INT >= 29) {
             startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION | ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
         } else {
@@ -104,7 +111,7 @@ public class ScreenRecordService extends Service {
             int density = metrics.densityDpi;
 
             String stamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.FRANCE).format(new Date());
-            String fileName = "cam_live_" + stamp + ".mp4";
+            String fileName = "CamLive_" + stamp + ".mp4";
 
             mediaRecorder = new MediaRecorder();
             mediaRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
@@ -130,7 +137,10 @@ public class ScreenRecordService extends Service {
             );
             mediaRecorder.start();
             isPaused = false;
-            updateRecordingNotification("Enregistrement en cours");
+            startedAt = System.currentTimeMillis();
+            elapsedBeforePause = 0L;
+            markRecordingState(true, false);
+            updateRecordingNotification("REC " + formatElapsed(getElapsedMs()));
         } catch (Exception e) {
             e.printStackTrace();
             stopRecording(false);
@@ -146,13 +156,9 @@ public class ScreenRecordService extends Service {
             values.put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/CamLive");
             values.put(MediaStore.Video.Media.IS_PENDING, 1);
             currentVideoUri = getContentResolver().insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values);
-            if (currentVideoUri == null) {
-                throw new IllegalStateException("Impossible de creer la video");
-            }
+            if (currentVideoUri == null) throw new IllegalStateException("Impossible de creer le fichier MP4");
             outputDescriptor = getContentResolver().openFileDescriptor(currentVideoUri, "w");
-            if (outputDescriptor == null) {
-                throw new IllegalStateException("Impossible d'ouvrir la video");
-            }
+            if (outputDescriptor == null) throw new IllegalStateException("Impossible d'ouvrir le fichier MP4");
             mediaRecorder.setOutputFile(outputDescriptor.getFileDescriptor());
         } else {
             File moviesDir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), "CamLive");
@@ -167,8 +173,10 @@ public class ScreenRecordService extends Service {
         try {
             if (mediaRecorder != null && !isPaused) {
                 mediaRecorder.pause();
+                elapsedBeforePause = getElapsedMs();
                 isPaused = true;
-                updateRecordingNotification("Enregistrement en pause");
+                markRecordingState(true, true);
+                updateRecordingNotification("PAUSE " + formatElapsed(elapsedBeforePause));
             }
         } catch (Exception ignored) {}
     }
@@ -177,10 +185,25 @@ public class ScreenRecordService extends Service {
         try {
             if (mediaRecorder != null && isPaused) {
                 mediaRecorder.resume();
+                startedAt = System.currentTimeMillis();
                 isPaused = false;
-                updateRecordingNotification("Enregistrement en cours");
+                markRecordingState(true, false);
+                updateRecordingNotification("REC " + formatElapsed(getElapsedMs()));
             }
         } catch (Exception ignored) {}
+    }
+
+    private long getElapsedMs() {
+        if (startedAt == 0L) return elapsedBeforePause;
+        if (isPaused) return elapsedBeforePause;
+        return elapsedBeforePause + (System.currentTimeMillis() - startedAt);
+    }
+
+    private String formatElapsed(long ms) {
+        long seconds = Math.max(0, ms / 1000);
+        long minutes = seconds / 60;
+        long rest = seconds % 60;
+        return String.format(Locale.FRANCE, "%02d:%02d", minutes, rest);
     }
 
     private void stopRecording(boolean showFinishedNotification) {
@@ -205,8 +228,11 @@ public class ScreenRecordService extends Service {
         } catch (Exception ignored) {}
         mediaProjection = null;
         isPaused = false;
+        startedAt = 0L;
+        elapsedBeforePause = 0L;
 
         finishPublicOutput(saved);
+        markRecordingState(false, false);
         stopForeground(true);
 
         if (showFinishedNotification && saved && currentVideoUri != null) {
@@ -235,6 +261,17 @@ public class ScreenRecordService extends Service {
                 sendBroadcast(scanIntent);
             }
         } catch (Exception ignored) {}
+    }
+
+    private void markRecordingState(boolean active, boolean paused) {
+        long elapsed = active ? getElapsedMs() : 0L;
+        SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        prefs.edit()
+                .putBoolean(KEY_RECORDING_ACTIVE, active)
+                .putBoolean(KEY_RECORDING_PAUSED, paused)
+                .putLong(KEY_RECORDING_STARTED_AT, active ? startedAt : 0L)
+                .putLong(KEY_RECORDING_ELAPSED_MS, active ? elapsed : 0L)
+                .apply();
     }
 
     private void saveLastVideoUri(Uri uri) {
@@ -287,14 +324,14 @@ public class ScreenRecordService extends Service {
         shareIntent.setType("video/mp4");
         shareIntent.putExtra(Intent.EXTRA_STREAM, uri);
         shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-        PendingIntent sharePendingIntent = PendingIntent.getActivity(this, 22, Intent.createChooser(shareIntent, "Partager la video"), PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        PendingIntent sharePendingIntent = PendingIntent.getActivity(this, 22, Intent.createChooser(shareIntent, "Partager la video MP4"), PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
 
         Notification.Builder builder = Build.VERSION.SDK_INT >= 26
                 ? new Notification.Builder(this, CHANNEL_ID)
                 : new Notification.Builder(this);
         Notification notification = builder
-                .setContentTitle("Video Cam Live enregistree")
-                .setContentText("Disponible dans Galerie > Movies > CamLive")
+                .setContentTitle("MP4 Cam Live pret")
+                .setContentText("Enregistre dans Galerie > Movies > CamLive")
                 .setSmallIcon(android.R.drawable.presence_video_online)
                 .setContentIntent(openPendingIntent)
                 .addAction(android.R.drawable.ic_menu_view, "Ouvrir", openPendingIntent)
