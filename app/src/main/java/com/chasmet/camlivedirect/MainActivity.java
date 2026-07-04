@@ -5,11 +5,13 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.media.projection.MediaProjectionManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.provider.MediaStore;
 import android.provider.Settings;
 import android.view.Gravity;
 import android.widget.Button;
@@ -83,24 +85,28 @@ public class MainActivity extends Activity {
         infoParams.setMargins(0, 0, 0, 18);
         root.addView(permissionText, infoParams);
 
-        Button recordButton = makeButton("DEMARRER VIDEO + CAMERA", 0xffff1744, 20, 124);
-        Button cameraButton = makeButton("AFFICHER CAMERA FLOTTANTE", 0xff2f80ed, 18, 112);
-        Button earthButton = makeButton("OUVRIR GOOGLE EARTH", 0xff252b37, 17, 100);
-        Button webButton = makeButton("GOOGLE EARTH WEB", 0xff252b37, 17, 100);
-        Button stopButton = makeButton("STOPPER TOUT", 0xff3a3f4d, 17, 100);
+        Button recordButton = makeButton("DEMARRER VIDEO + CAMERA", 0xffff1744, 20, 118);
+        Button cameraButton = makeButton("AFFICHER CAMERA FLOTTANTE", 0xff2f80ed, 18, 102);
+        Button earthButton = makeButton("OUVRIR GOOGLE EARTH", 0xff252b37, 17, 94);
+        Button webButton = makeButton("GOOGLE EARTH WEB", 0xff252b37, 17, 94);
+        Button videosButton = makeButton("OUVRIR MA DERNIERE VIDEO", 0xff1f8f4d, 17, 94);
+        Button shareButton = makeButton("PARTAGER MA DERNIERE VIDEO", 0xff1f6f8f, 17, 94);
+        Button stopButton = makeButton("STOPPER TOUT", 0xff3a3f4d, 17, 94);
 
         root.addView(recordButton);
         root.addView(cameraButton);
         root.addView(earthButton);
         root.addView(webButton);
+        root.addView(videosButton);
+        root.addView(shareButton);
         root.addView(stopButton);
 
         TextView help = new TextView(this);
-        help.setText("Dans la camera flottante : glisse pour deplacer, + et - pour la taille, Pause et Stop pour controler la video.");
+        help.setText("La video finale est enregistree dans Galerie > Movies > CamLive. Dans la camera flottante : Pause, Stop, + et -.");
         help.setTextColor(0xffcfd3dc);
         help.setTextSize(15);
         help.setGravity(Gravity.CENTER);
-        help.setPadding(0, 22, 0, 10);
+        help.setPadding(0, 18, 0, 8);
         root.addView(help, new LinearLayout.LayoutParams(-1, -2));
 
         statusText = new TextView(this);
@@ -116,6 +122,8 @@ public class MainActivity extends Activity {
         cameraButton.setOnClickListener(v -> startFloatingCameraFlow(false));
         earthButton.setOnClickListener(v -> openGoogleEarthApp());
         webButton.setOnClickListener(v -> openGoogleEarthWeb());
+        videosButton.setOnClickListener(v -> openLastVideo());
+        shareButton.setOnClickListener(v -> shareLastVideo());
         stopButton.setOnClickListener(v -> stopEverything());
     }
 
@@ -127,7 +135,7 @@ public class MainActivity extends Activity {
         button.setAllCaps(false);
         button.setBackgroundColor(color);
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, height);
-        params.setMargins(0, 8, 0, 8);
+        params.setMargins(0, 7, 0, 7);
         button.setLayoutParams(params);
         return button;
     }
@@ -223,7 +231,7 @@ public class MainActivity extends Activity {
                 serviceIntent.putExtra(ScreenRecordService.EXTRA_RESULT_CODE, resultCode);
                 serviceIntent.putExtra(ScreenRecordService.EXTRA_RESULT_DATA, data);
                 startForegroundServiceCompat(serviceIntent);
-                statusText.setText("Enregistrement lance. Tu peux ouvrir Google Earth, Maps, YouTube ou TikTok.");
+                statusText.setText("Enregistrement lance. La video sera dans Galerie > Movies > CamLive.");
             } else {
                 statusText.setText("Capture annulee.");
             }
@@ -237,7 +245,7 @@ public class MainActivity extends Activity {
         Intent cameraStop = new Intent(this, CameraOverlayService.class);
         cameraStop.setAction(CameraOverlayService.ACTION_STOP);
         startService(cameraStop);
-        statusText.setText("Camera et video arretees.");
+        statusText.setText("Camera et video arretees. Regarde dans Galerie > Movies > CamLive.");
     }
 
     private void openGoogleEarthApp() {
@@ -256,6 +264,50 @@ public class MainActivity extends Activity {
         startFloatingCameraNow();
         Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse("https://earth.google.com/web/"));
         startActivity(intent);
+    }
+
+    private Uri getLastVideoUri() {
+        SharedPreferences prefs = getSharedPreferences(ScreenRecordService.PREFS, MODE_PRIVATE);
+        String uriString = prefs.getString(ScreenRecordService.KEY_LAST_VIDEO_URI, null);
+        if (uriString == null) return null;
+        return Uri.parse(uriString);
+    }
+
+    private void openLastVideo() {
+        Uri uri = getLastVideoUri();
+        if (uri == null) {
+            openVideosCollection();
+            Toast.makeText(this, "Aucune video Cam Live recente", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        Intent intent = new Intent(Intent.ACTION_VIEW);
+        intent.setDataAndType(uri, "video/mp4");
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        try {
+            startActivity(intent);
+        } catch (Exception e) {
+            openVideosCollection();
+        }
+    }
+
+    private void shareLastVideo() {
+        Uri uri = getLastVideoUri();
+        if (uri == null) {
+            Toast.makeText(this, "Enregistre d'abord une video", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        Intent shareIntent = new Intent(Intent.ACTION_SEND);
+        shareIntent.setType("video/mp4");
+        shareIntent.putExtra(Intent.EXTRA_STREAM, uri);
+        shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        startActivity(Intent.createChooser(shareIntent, "Partager la video Cam Live"));
+    }
+
+    private void openVideosCollection() {
+        try {
+            Intent intent = new Intent(Intent.ACTION_VIEW, MediaStore.Video.Media.EXTERNAL_CONTENT_URI);
+            startActivity(intent);
+        } catch (Exception ignored) {}
     }
 
     private void startForegroundServiceCompat(Intent intent) {
