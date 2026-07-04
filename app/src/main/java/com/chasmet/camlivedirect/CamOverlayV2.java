@@ -90,12 +90,12 @@ public class CamOverlayV2 extends Service {
     }
 
     private void buildOverlay() {
-        widthPx = dp(210);
-        heightPx = dp(285);
+        widthPx = dp(170);
+        heightPx = dp(230);
         windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
         overlay = new FrameLayout(this);
         overlay.setBackgroundColor(Color.BLACK);
-        overlay.setPadding(dp(2), dp(2), dp(2), dp(2));
+        overlay.setPadding(dp(1), dp(1), dp(1), dp(1));
 
         LinearLayout column = new LinearLayout(this);
         column.setOrientation(LinearLayout.VERTICAL);
@@ -108,8 +108,8 @@ public class CamOverlayV2 extends Service {
         controls.setOrientation(LinearLayout.HORIZONTAL);
         controls.setGravity(Gravity.CENTER);
         controls.setBackgroundColor(0xee101018);
-        controls.setPadding(dp(3), dp(3), dp(3), dp(3));
-        column.addView(controls, new LinearLayout.LayoutParams(-1, dp(46)));
+        controls.setPadding(dp(2), dp(2), dp(2), dp(2));
+        column.addView(controls, new LinearLayout.LayoutParams(-1, dp(38)));
 
         pauseButton = control("Pause");
         TextView minus = control("-");
@@ -121,12 +121,12 @@ public class CamOverlayV2 extends Service {
         controls.addView(stop);
 
         badge = new TextView(this);
-        badge.setText("CAM PRETE");
+        badge.setText("CAM");
         badge.setTextColor(Color.WHITE);
-        badge.setTextSize(13);
+        badge.setTextSize(11);
         badge.setGravity(Gravity.CENTER);
         badge.setBackgroundColor(0xcc000000);
-        badge.setPadding(dp(8), dp(5), dp(8), dp(5));
+        badge.setPadding(dp(6), dp(4), dp(6), dp(4));
         overlay.addView(badge, new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.LEFT));
 
         int type = Build.VERSION.SDK_INT >= 26 ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY : WindowManager.LayoutParams.TYPE_PHONE;
@@ -138,8 +138,9 @@ public class CamOverlayV2 extends Service {
         setDrag(preview);
         setDrag(badge);
         pauseButton.setOnClickListener(v -> togglePause());
-        minus.setOnClickListener(v -> resize(-dp(35)));
-        plus.setOnClickListener(v -> resize(dp(35)));
+        minus.setOnClickListener(v -> resize(-dp(28)));
+        minus.setOnLongClickListener(v -> { setMiniSize(); return true; });
+        plus.setOnClickListener(v -> resize(dp(28)));
         stop.setOnClickListener(v -> stopAction());
 
         preview.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
@@ -155,11 +156,11 @@ public class CamOverlayV2 extends Service {
         TextView view = new TextView(this);
         view.setText(text);
         view.setTextColor(Color.WHITE);
-        view.setTextSize(13);
+        view.setTextSize(12);
         view.setGravity(Gravity.CENTER);
         view.setBackgroundColor(0xff333846);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -1, 1f);
-        lp.setMargins(dp(3), 0, dp(3), 0);
+        lp.setMargins(dp(2), 0, dp(2), 0);
         view.setLayoutParams(lp);
         return view;
     }
@@ -193,9 +194,9 @@ public class CamOverlayV2 extends Service {
         if (active) {
             badge.setText((paused ? "PAUSE " : "REC ") + time(elapsed));
             badge.setBackgroundColor(paused ? 0xccff9800 : 0xccd50000);
-            pauseButton.setText(paused ? "Reprendre" : "Pause");
+            pauseButton.setText(paused ? "Play" : "Pause");
         } else {
-            badge.setText("CAM PRETE");
+            badge.setText("CAM");
             badge.setBackgroundColor(0xcc000000);
             pauseButton.setText("Pause");
         }
@@ -229,8 +230,16 @@ public class CamOverlayV2 extends Service {
     }
 
     private void resize(int delta) {
-        widthPx = Math.max(dp(155), Math.min(dp(340), widthPx + delta));
-        heightPx = Math.max(dp(210), Math.min(dp(455), heightPx + (int) (delta * 1.35f)));
+        widthPx = Math.max(dp(88), Math.min(dp(360), widthPx + delta));
+        heightPx = Math.max(dp(120), Math.min(dp(485), heightPx + (int) (delta * 1.35f)));
+        params.width = widthPx;
+        params.height = heightPx;
+        windowManager.updateViewLayout(overlay, params);
+    }
+
+    private void setMiniSize() {
+        widthPx = dp(88);
+        heightPx = dp(120);
         params.width = widthPx;
         params.height = heightPx;
         windowManager.updateViewLayout(overlay, params);
