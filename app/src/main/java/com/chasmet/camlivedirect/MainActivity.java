@@ -34,7 +34,7 @@ public class MainActivity extends Activity {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setGravity(Gravity.CENTER);
-        root.setPadding(42, 42, 42, 42);
+        root.setPadding(36, 36, 36, 36);
         root.setBackgroundColor(0xff101018);
 
         TextView title = new TextView(this);
@@ -45,47 +45,50 @@ public class MainActivity extends Activity {
         root.addView(title, new LinearLayout.LayoutParams(-1, -2));
 
         TextView subtitle = new TextView(this);
-        subtitle.setText("Enregistre ton ecran, ta voix et ta camera flottante. Lance l'enregistrement, puis ouvre Google Earth, Maps, YouTube, TikTok ou une autre application.");
+        subtitle.setText("Mode camera partout : active la camera flottante, puis ouvre Google Earth ou une autre application. Pour enregistrer, appuie d'abord sur Demarrer.");
         subtitle.setTextColor(0xffd8d8df);
-        subtitle.setTextSize(17);
+        subtitle.setTextSize(16);
         subtitle.setGravity(Gravity.CENTER);
-        subtitle.setPadding(0, 20, 0, 28);
+        subtitle.setPadding(0, 20, 0, 24);
         root.addView(subtitle, new LinearLayout.LayoutParams(-1, -2));
 
-        Button startButton = makeButton("Demarrer l'enregistrement", 0xffff1744);
-        Button stopButton = makeButton("Arreter", 0xff333846);
-        Button overlayButton = makeButton("Autoriser la camera flottante", 0xff2f80ed);
-        Button openEarthButton = makeButton("Ouvrir Google Earth", 0xff242936);
+        Button startButton = makeButton("1. Demarrer video + camera", 0xffff1744);
+        Button cameraButton = makeButton("2. Activer camera partout", 0xff2f80ed);
+        Button earthButton = makeButton("3. Ouvrir Google Earth", 0xff242936);
+        Button browserButton = makeButton("Ouvrir Google Earth Web", 0xff242936);
+        Button stopButton = makeButton("Arreter camera et video", 0xff333846);
 
         root.addView(startButton);
+        root.addView(cameraButton);
+        root.addView(earthButton);
+        root.addView(browserButton);
         root.addView(stopButton);
-        root.addView(overlayButton);
-        root.addView(openEarthButton);
 
         statusText = new TextView(this);
-        statusText.setText("Pret. Autorise la camera flottante avant le premier test.");
+        statusText.setText("Pret. Appuie sur Activer camera partout pour voir la camera au-dessus des autres applis.");
         statusText.setTextColor(0xffffffff);
         statusText.setTextSize(15);
         statusText.setGravity(Gravity.CENTER);
-        statusText.setPadding(0, 26, 0, 0);
+        statusText.setPadding(0, 24, 0, 0);
         root.addView(statusText, new LinearLayout.LayoutParams(-1, -2));
         setContentView(root);
 
         startButton.setOnClickListener(v -> startRecordingFlow());
+        cameraButton.setOnClickListener(v -> startFloatingCameraOnly());
+        earthButton.setOnClickListener(v -> openGoogleEarthAppWithCamera());
+        browserButton.setOnClickListener(v -> openGoogleEarthWebWithCamera());
         stopButton.setOnClickListener(v -> stopRecording());
-        overlayButton.setOnClickListener(v -> openOverlaySettingsIfNeeded());
-        openEarthButton.setOnClickListener(v -> openGoogleEarth());
     }
 
     private Button makeButton(String text, int color) {
         Button button = new Button(this);
         button.setText(text);
-        button.setTextSize(18);
+        button.setTextSize(17);
         button.setTextColor(0xffffffff);
         button.setAllCaps(false);
         button.setBackgroundColor(color);
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, 118);
-        params.setMargins(0, 12, 0, 12);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, 106);
+        params.setMargins(0, 10, 0, 10);
         button.setLayoutParams(params);
         return button;
     }
@@ -99,31 +102,47 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void openOverlaySettingsIfNeeded() {
+    private boolean checkOverlayPermission() {
         if (Build.VERSION.SDK_INT >= 23 && !Settings.canDrawOverlays(this)) {
             Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName()));
             startActivity(intent);
-            statusText.setText("Active l'autorisation : afficher par-dessus les autres applis.");
-        } else {
-            Toast.makeText(this, "Camera flottante autorisee", Toast.LENGTH_SHORT).show();
+            statusText.setText("Active Afficher par-dessus les autres applis, puis reviens dans Cam Live.");
+            return false;
         }
+        return true;
+    }
+
+    private boolean hasCameraPermission() {
+        return Build.VERSION.SDK_INT < 23 || checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private boolean hasMicPermission() {
+        return Build.VERSION.SDK_INT < 23 || checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
     }
 
     private boolean hasNeededPermissions() {
-        boolean cameraOk = Build.VERSION.SDK_INT < 23 || checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED;
-        boolean micOk = Build.VERSION.SDK_INT < 23 || checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
-        boolean overlayOk = Build.VERSION.SDK_INT < 23 || Settings.canDrawOverlays(this);
-        return cameraOk && micOk && overlayOk;
+        return hasCameraPermission() && hasMicPermission() && checkOverlayPermission();
+    }
+
+    private void startFloatingCameraOnly() {
+        if (!hasCameraPermission()) {
+            askBasicPermissions();
+            statusText.setText("Autorise la camera, puis recommence.");
+            return;
+        }
+        if (!checkOverlayPermission()) return;
+        startForegroundServiceCompat(new Intent(this, CameraOverlayService.class));
+        statusText.setText("Camera flottante active. Tu peux ouvrir n'importe quelle application.");
+        Toast.makeText(this, "Camera active partout", Toast.LENGTH_SHORT).show();
     }
 
     private void startRecordingFlow() {
         if (!hasNeededPermissions()) {
             askBasicPermissions();
-            openOverlaySettingsIfNeeded();
             statusText.setText("Permissions necessaires : camera, micro et affichage par-dessus les applis.");
             return;
         }
-        startForegroundServiceCompat(new Intent(this, CameraOverlayService.class));
+        startFloatingCameraOnly();
         startActivityForResult(projectionManager.createScreenCaptureIntent(), REQUEST_SCREEN_CAPTURE);
     }
 
@@ -137,7 +156,7 @@ public class MainActivity extends Activity {
                 serviceIntent.putExtra(ScreenRecordService.EXTRA_RESULT_CODE, resultCode);
                 serviceIntent.putExtra(ScreenRecordService.EXTRA_RESULT_DATA, data);
                 startForegroundServiceCompat(serviceIntent);
-                statusText.setText("Enregistrement lance. Tu peux quitter Cam Live et ouvrir une autre application.");
+                statusText.setText("Enregistrement lance. Ouvre Google Earth ou une autre application.");
             } else {
                 statusText.setText("Capture annulee.");
             }
@@ -151,14 +170,22 @@ public class MainActivity extends Activity {
         Intent cameraStop = new Intent(this, CameraOverlayService.class);
         cameraStop.setAction(CameraOverlayService.ACTION_STOP);
         startService(cameraStop);
-        statusText.setText("Arret demande. La video est dans le dossier Movies de Cam Live.");
+        statusText.setText("Arret demande.");
     }
 
-    private void openGoogleEarth() {
+    private void openGoogleEarthAppWithCamera() {
+        startFloatingCameraOnly();
         Intent intent = getPackageManager().getLaunchIntentForPackage("com.google.earth");
         if (intent == null) {
-            intent = new Intent(Intent.ACTION_VIEW, Uri.parse("https://earth.google.com/web/"));
+            openGoogleEarthWebWithCamera();
+            return;
         }
+        startActivity(intent);
+    }
+
+    private void openGoogleEarthWebWithCamera() {
+        startFloatingCameraOnly();
+        Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse("https://earth.google.com/web/"));
         startActivity(intent);
     }
 
