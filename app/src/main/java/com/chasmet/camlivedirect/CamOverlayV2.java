@@ -24,6 +24,7 @@ import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.Surface;
 import android.view.TextureView;
+import android.view.View;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
@@ -36,10 +37,12 @@ public class CamOverlayV2 extends Service {
     public static final String ACTION_STOP = "com.chasmet.camlivedirect.STOP_CAMERA_V2";
     private static final String CHANNEL_ID = "cam_live_camera_v2";
     private static final int NOTIFICATION_ID = 30;
+    private static final long CONTROLS_HIDE_DELAY_MS = 3000L;
 
     private WindowManager windowManager;
     private FrameLayout overlay;
     private TextureView preview;
+    private LinearLayout controlsBar;
     private TextView badge;
     private TextView pauseButton;
     private WindowManager.LayoutParams params;
@@ -62,6 +65,12 @@ public class CamOverlayV2 extends Service {
         }
     };
 
+    private final Runnable hideControlsRunnable = new Runnable() {
+        @Override public void run() {
+            hideControls();
+        }
+    };
+
     @Override
     public void onCreate() {
         super.onCreate();
@@ -71,6 +80,7 @@ public class CamOverlayV2 extends Service {
         startCameraThread();
         buildOverlay();
         uiHandler.post(ticker);
+        showControlsTemporarily();
     }
 
     @Override
@@ -104,21 +114,21 @@ public class CamOverlayV2 extends Service {
         preview = new TextureView(this);
         column.addView(preview, new LinearLayout.LayoutParams(-1, 0, 1f));
 
-        LinearLayout controls = new LinearLayout(this);
-        controls.setOrientation(LinearLayout.HORIZONTAL);
-        controls.setGravity(Gravity.CENTER);
-        controls.setBackgroundColor(0xee101018);
-        controls.setPadding(dp(2), dp(2), dp(2), dp(2));
-        column.addView(controls, new LinearLayout.LayoutParams(-1, dp(38)));
+        controlsBar = new LinearLayout(this);
+        controlsBar.setOrientation(LinearLayout.HORIZONTAL);
+        controlsBar.setGravity(Gravity.CENTER);
+        controlsBar.setBackgroundColor(0xee101018);
+        controlsBar.setPadding(dp(2), dp(2), dp(2), dp(2));
+        column.addView(controlsBar, new LinearLayout.LayoutParams(-1, dp(38)));
 
         pauseButton = control("Pause");
         TextView minus = control("-");
         TextView plus = control("+");
         TextView stop = control("Stop");
-        controls.addView(pauseButton);
-        controls.addView(minus);
-        controls.addView(plus);
-        controls.addView(stop);
+        controlsBar.addView(pauseButton);
+        controlsBar.addView(minus);
+        controlsBar.addView(plus);
+        controlsBar.addView(stop);
 
         badge = new TextView(this);
         badge.setText("CAM");
@@ -137,11 +147,11 @@ public class CamOverlayV2 extends Service {
 
         setDrag(preview);
         setDrag(badge);
-        pauseButton.setOnClickListener(v -> togglePause());
-        minus.setOnClickListener(v -> resize(-dp(28)));
-        minus.setOnLongClickListener(v -> { setMiniSize(); return true; });
-        plus.setOnClickListener(v -> resize(dp(28)));
-        stop.setOnClickListener(v -> stopAction());
+        pauseButton.setOnClickListener(v -> { showControlsTemporarily(); togglePause(); });
+        minus.setOnClickListener(v -> { showControlsTemporarily(); resize(-dp(28)); });
+        minus.setOnLongClickListener(v -> { showControlsTemporarily(); setMiniSize(); return true; });
+        plus.setOnClickListener(v -> { showControlsTemporarily(); resize(dp(28)); });
+        stop.setOnClickListener(v -> { showControlsTemporarily(); stopAction(); });
 
         preview.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
             @Override public void onSurfaceTextureAvailable(SurfaceTexture surface, int width, int height) { openCamera(surface); }
@@ -168,6 +178,7 @@ public class CamOverlayV2 extends Service {
     private void setDrag(android.view.View view) {
         view.setOnTouchListener((target, event) -> {
             if (event.getAction() == MotionEvent.ACTION_DOWN) {
+                showControlsTemporarily();
                 downX = event.getRawX();
                 downY = event.getRawY();
                 startX = params.x;
@@ -175,13 +186,29 @@ public class CamOverlayV2 extends Service {
                 return true;
             }
             if (event.getAction() == MotionEvent.ACTION_MOVE) {
+                showControlsTemporarily();
                 params.x = startX + (int) (event.getRawX() - downX);
                 params.y = startY + (int) (event.getRawY() - downY);
                 windowManager.updateViewLayout(overlay, params);
                 return true;
             }
+            if (event.getAction() == MotionEvent.ACTION_UP) {
+                showControlsTemporarily();
+                return true;
+            }
             return true;
         });
+    }
+
+    private void showControlsTemporarily() {
+        if (controlsBar == null || uiHandler == null) return;
+        controlsBar.setVisibility(View.VISIBLE);
+        uiHandler.removeCallbacks(hideControlsRunnable);
+        uiHandler.postDelayed(hideControlsRunnable, CONTROLS_HIDE_DELAY_MS);
+    }
+
+    private void hideControls() {
+        if (controlsBar != null) controlsBar.setVisibility(View.GONE);
     }
 
     private void refreshBadge() {
@@ -309,7 +336,10 @@ public class CamOverlayV2 extends Service {
 
     @Override
     public void onDestroy() {
-        if (uiHandler != null) uiHandler.removeCallbacks(ticker);
+        if (uiHandler != null) {
+            uiHandler.removeCallbacks(ticker);
+            uiHandler.removeCallbacks(hideControlsRunnable);
+        }
         closeCamera();
         if (windowManager != null && overlay != null) {
             try { windowManager.removeView(overlay); } catch (Exception ignored) {}
