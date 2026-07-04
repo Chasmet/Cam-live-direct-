@@ -189,13 +189,13 @@ public class MainActivityV2 extends Activity {
 
     private void showFloatingCamera() {
         if (!readyForCam()) return;
-        startServiceCompat(new Intent(this, CameraOverlayService.class));
+        startServiceCompat(new Intent(this, CamOverlayV2.class));
         Toast.makeText(this, "Camera flottante active", Toast.LENGTH_SHORT).show();
     }
 
     private void startRecording() {
         if (!readyForCam()) return;
-        startServiceCompat(new Intent(this, CameraOverlayService.class));
+        startServiceCompat(new Intent(this, CamOverlayV2.class));
         startActivityForResult(projectionManager.createScreenCaptureIntent(), REQUEST_SCREEN_CAPTURE);
     }
 
@@ -217,8 +217,8 @@ public class MainActivityV2 extends Activity {
         Intent stopRecord = new Intent(this, ScreenRecordService.class);
         stopRecord.setAction(ScreenRecordService.ACTION_STOP);
         startService(stopRecord);
-        Intent stopCam = new Intent(this, CameraOverlayService.class);
-        stopCam.setAction(CameraOverlayService.ACTION_STOP);
+        Intent stopCam = new Intent(this, CamOverlayV2.class);
+        stopCam.setAction(CamOverlayV2.ACTION_STOP);
         startService(stopCam);
         Toast.makeText(this, "MP4 sauvegarde dans Galerie > Movies > CamLive", Toast.LENGTH_LONG).show();
         refreshStatus();
