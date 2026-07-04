@@ -23,9 +23,9 @@ import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.Surface;
 import android.view.TextureView;
-import android.view.View;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import java.util.Collections;
@@ -43,18 +43,22 @@ public class CameraOverlayService extends Service {
     private CameraCaptureSession captureSession;
     private HandlerThread cameraThread;
     private Handler cameraHandler;
+    private TextView pauseButton;
+    private boolean recordPaused = false;
     private float downX;
     private float downY;
     private int startX;
     private int startY;
+    private int cameraWidth = 360;
+    private int cameraHeight = 500;
 
     @Override
     public void onCreate() {
         super.onCreate();
         createNotificationChannel();
         startAsForeground();
-        buildOverlay();
         startCameraThread();
+        buildOverlay();
     }
 
     @Override
@@ -89,11 +93,33 @@ public class CameraOverlayService extends Service {
         overlayView.setBackgroundColor(Color.BLACK);
         overlayView.setPadding(4, 4, 4, 4);
 
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        overlayView.addView(content, new FrameLayout.LayoutParams(-1, -1));
+
         textureView = new TextureView(this);
-        overlayView.addView(textureView, new FrameLayout.LayoutParams(-1, -1));
+        LinearLayout.LayoutParams previewParams = new LinearLayout.LayoutParams(-1, 0, 1f);
+        content.addView(textureView, previewParams);
+
+        LinearLayout controls = new LinearLayout(this);
+        controls.setOrientation(LinearLayout.HORIZONTAL);
+        controls.setGravity(Gravity.CENTER);
+        controls.setBackgroundColor(0xdd111111);
+        controls.setPadding(4, 4, 4, 4);
+        content.addView(controls, new LinearLayout.LayoutParams(-1, 72));
+
+        pauseButton = makeControlButton("Pause");
+        TextView minusButton = makeControlButton("-");
+        TextView plusButton = makeControlButton("+");
+        TextView stopButton = makeControlButton("Stop");
+
+        controls.addView(pauseButton);
+        controls.addView(minusButton);
+        controls.addView(plusButton);
+        controls.addView(stopButton);
 
         TextView label = new TextView(this);
-        label.setText("CAM");
+        label.setText("CAM LIVE");
         label.setTextColor(Color.WHITE);
         label.setTextSize(12);
         label.setBackgroundColor(0x99000000);
@@ -103,8 +129,8 @@ public class CameraOverlayService extends Service {
 
         int type = Build.VERSION.SDK_INT >= 26 ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY : WindowManager.LayoutParams.TYPE_PHONE;
         layoutParams = new WindowManager.LayoutParams(
-                360,
-                480,
+                cameraWidth,
+                cameraHeight,
                 type,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                 android.graphics.PixelFormat.TRANSLUCENT
@@ -113,22 +139,16 @@ public class CameraOverlayService extends Service {
         layoutParams.x = 24;
         layoutParams.y = 80;
 
-        overlayView.setOnTouchListener((view, event) -> {
-            switch (event.getAction()) {
-                case MotionEvent.ACTION_DOWN:
-                    downX = event.getRawX();
-                    downY = event.getRawY();
-                    startX = layoutParams.x;
-                    startY = layoutParams.y;
-                    return true;
-                case MotionEvent.ACTION_MOVE:
-                    layoutParams.x = startX + (int) (event.getRawX() - downX);
-                    layoutParams.y = startY + (int) (event.getRawY() - downY);
-                    windowManager.updateViewLayout(overlayView, layoutParams);
-                    return true;
-                default:
-                    return true;
-            }
+        setDragTouch(overlayView);
+        setDragTouch(textureView);
+        setDragTouch(label);
+
+        pauseButton.setOnClickListener(v -> toggleRecordPause());
+        minusButton.setOnClickListener(v -> resizeCamera(-60));
+        plusButton.setOnClickListener(v -> resizeCamera(60));
+        stopButton.setOnClickListener(v -> {
+            sendRecordAction(ScreenRecordService.ACTION_STOP);
+            stopSelf();
         });
 
         textureView.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
@@ -151,6 +171,65 @@ public class CameraOverlayService extends Service {
         });
 
         windowManager.addView(overlayView, layoutParams);
+    }
+
+    private TextView makeControlButton(String text) {
+        TextView button = new TextView(this);
+        button.setText(text);
+        button.setTextColor(Color.WHITE);
+        button.setTextSize(14);
+        button.setGravity(Gravity.CENTER);
+        button.setBackgroundColor(0xff333846);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, -1, 1f);
+        params.setMargins(4, 0, 4, 0);
+        button.setLayoutParams(params);
+        return button;
+    }
+
+    private void setDragTouch(android.view.View view) {
+        view.setOnTouchListener((target, event) -> {
+            switch (event.getAction()) {
+                case MotionEvent.ACTION_DOWN:
+                    downX = event.getRawX();
+                    downY = event.getRawY();
+                    startX = layoutParams.x;
+                    startY = layoutParams.y;
+                    return true;
+                case MotionEvent.ACTION_MOVE:
+                    layoutParams.x = startX + (int) (event.getRawX() - downX);
+                    layoutParams.y = startY + (int) (event.getRawY() - downY);
+                    windowManager.updateViewLayout(overlayView, layoutParams);
+                    return true;
+                default:
+                    return true;
+            }
+        });
+    }
+
+    private void toggleRecordPause() {
+        if (recordPaused) {
+            sendRecordAction(ScreenRecordService.ACTION_RESUME);
+            pauseButton.setText("Pause");
+            recordPaused = false;
+        } else {
+            sendRecordAction(ScreenRecordService.ACTION_PAUSE);
+            pauseButton.setText("Reprendre");
+            recordPaused = true;
+        }
+    }
+
+    private void resizeCamera(int delta) {
+        cameraWidth = Math.max(220, Math.min(720, cameraWidth + delta));
+        cameraHeight = Math.max(300, Math.min(960, cameraHeight + (int) (delta * 1.35f)));
+        layoutParams.width = cameraWidth;
+        layoutParams.height = cameraHeight;
+        windowManager.updateViewLayout(overlayView, layoutParams);
+    }
+
+    private void sendRecordAction(String action) {
+        Intent intent = new Intent(this, ScreenRecordService.class);
+        intent.setAction(action);
+        startService(intent);
     }
 
     private void startCameraThread() {
