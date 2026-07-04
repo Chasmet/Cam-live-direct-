@@ -67,7 +67,6 @@ public class ScreenRecordService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent == null) return START_NOT_STICKY;
-
         String action = intent.getAction();
         if (ACTION_STOP.equals(action)) {
             stopAndSave(true);
@@ -127,16 +126,7 @@ public class ScreenRecordService extends Service {
             recorder.setVideoFrameRate(30);
             recorder.prepare();
 
-            virtualDisplay = projection.createVirtualDisplay(
-                    "CamLiveScreen",
-                    width,
-                    height,
-                    density,
-                    DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-                    recorder.getSurface(),
-                    null,
-                    null
-            );
+            virtualDisplay = projection.createVirtualDisplay("CamLiveScreen", width, height, density, DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, recorder.getSurface(), null, null);
             recorder.start();
             paused = false;
             startedAt = System.currentTimeMillis();
@@ -199,7 +189,6 @@ public class ScreenRecordService extends Service {
         boolean saved = false;
         try { if (virtualDisplay != null) virtualDisplay.release(); } catch (Exception ignored) {}
         virtualDisplay = null;
-
         try {
             if (recorder != null) {
                 recorder.stop();
@@ -209,17 +198,14 @@ public class ScreenRecordService extends Service {
             }
         } catch (Exception ignored) {}
         recorder = null;
-
         try { if (projection != null) projection.stop(); } catch (Exception ignored) {}
         projection = null;
         paused = false;
         startedAt = 0L;
         elapsedBeforePause = 0L;
         setRecordState(false, false);
-
         finishMp4(saved);
         stopForeground(true);
-
         if (visibleResult && saved && videoUri != null) {
             saveLastVideo(videoUri);
             notifyVideoReady(videoUri);
@@ -230,7 +216,6 @@ public class ScreenRecordService extends Service {
     private void finishMp4(boolean saved) {
         try { if (outputDescriptor != null) outputDescriptor.close(); } catch (Exception ignored) {}
         outputDescriptor = null;
-
         try {
             if (Build.VERSION.SDK_INT >= 29 && videoUri != null) {
                 ContentValues values = new ContentValues();
@@ -250,8 +235,7 @@ public class ScreenRecordService extends Service {
         try {
             Intent open = new Intent(Intent.ACTION_VIEW);
             open.setDataAndType(uri, "video/mp4");
-            open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            open.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION);
             startActivity(open);
         } catch (Exception ignored) {}
     }
@@ -261,23 +245,13 @@ public class ScreenRecordService extends Service {
         openIntent.setDataAndType(uri, "video/mp4");
         openIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         PendingIntent openPendingIntent = PendingIntent.getActivity(this, 21, openIntent, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
-
         Intent shareIntent = new Intent(Intent.ACTION_SEND);
         shareIntent.setType("video/mp4");
         shareIntent.putExtra(Intent.EXTRA_STREAM, uri);
         shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         PendingIntent sharePendingIntent = PendingIntent.getActivity(this, 22, Intent.createChooser(shareIntent, "Partager le MP4"), PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
-
         Notification.Builder builder = Build.VERSION.SDK_INT >= 26 ? new Notification.Builder(this, CHANNEL_ID) : new Notification.Builder(this);
-        Notification notification = builder
-                .setContentTitle("MP4 Cam Live sauvegarde")
-                .setContentText("Galerie > Movies > CamLive")
-                .setSmallIcon(android.R.drawable.presence_video_online)
-                .setContentIntent(openPendingIntent)
-                .addAction(android.R.drawable.ic_menu_view, "Ouvrir", openPendingIntent)
-                .addAction(android.R.drawable.ic_menu_share, "Partager", sharePendingIntent)
-                .setAutoCancel(true)
-                .build();
+        Notification notification = builder.setContentTitle("MP4 Cam Live sauvegarde").setContentText("Galerie > Movies > CamLive").setSmallIcon(android.R.drawable.presence_video_online).setContentIntent(openPendingIntent).addAction(android.R.drawable.ic_menu_view, "Ouvrir", openPendingIntent).addAction(android.R.drawable.ic_menu_share, "Partager", sharePendingIntent).setAutoCancel(true).build();
         ((NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE)).notify(FINISHED_NOTIFICATION_ID, notification);
     }
 
@@ -291,12 +265,8 @@ public class ScreenRecordService extends Service {
         Intent stopIntent = new Intent(this, ScreenRecordService.class);
         stopIntent.setAction(ACTION_STOP);
         PendingIntent stopPending = PendingIntent.getService(this, 11, stopIntent, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
-
         Notification.Builder builder = Build.VERSION.SDK_INT >= 26 ? new Notification.Builder(this, CHANNEL_ID) : new Notification.Builder(this);
-        builder.setContentTitle("Cam Live")
-                .setContentText(text)
-                .setSmallIcon(android.R.drawable.presence_video_online)
-                .setOngoing(true);
+        builder.setContentTitle("Cam Live").setContentText(text).setSmallIcon(android.R.drawable.presence_video_online).setOngoing(true);
         if (paused) builder.addAction(android.R.drawable.ic_media_play, "Reprendre", resumePending);
         else builder.addAction(android.R.drawable.ic_media_pause, "Pause", pausePending);
         builder.addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop MP4", stopPending);
@@ -342,7 +312,7 @@ public class ScreenRecordService extends Service {
 
     @Override
     public void onDestroy() {
-        stopAndSave(false);
+        if (recorder != null) stopAndSave(false);
         super.onDestroy();
     }
 
