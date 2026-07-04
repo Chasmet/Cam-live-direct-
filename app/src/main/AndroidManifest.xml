@@ -40,6 +40,11 @@
             android:foregroundServiceType="mediaProjection|microphone" />
 
         <service
+            android:name=".CamOverlayV2"
+            android:exported="false"
+            android:foregroundServiceType="camera" />
+
+        <service
             android:name=".CameraOverlayService"
             android:exported="false"
             android:foregroundServiceType="camera" />
