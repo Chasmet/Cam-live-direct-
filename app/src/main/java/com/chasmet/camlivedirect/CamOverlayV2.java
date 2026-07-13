@@ -57,16 +57,19 @@ public class CamOverlayV2 extends Service {
     private int startY;
     private int widthPx;
     private int heightPx;
+    private int cameraRotation;
 
     private final Runnable ticker = new Runnable() {
-        @Override public void run() {
+        @Override
+        public void run() {
             refreshBadge();
             if (uiHandler != null) uiHandler.postDelayed(this, 500);
         }
     };
 
     private final Runnable hideControlsRunnable = new Runnable() {
-        @Override public void run() {
+        @Override
+        public void run() {
             hideControls();
         }
     };
@@ -93,16 +96,28 @@ public class CamOverlayV2 extends Service {
     }
 
     private void startForegroundSafe() {
-        Notification.Builder builder = Build.VERSION.SDK_INT >= 26 ? new Notification.Builder(this, CHANNEL_ID) : new Notification.Builder(this);
-        Notification notification = builder.setContentTitle("Cam Live").setContentText("Camera flottante active").setSmallIcon(android.R.drawable.presence_video_online).setOngoing(true).build();
-        if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA);
-        else startForeground(NOTIFICATION_ID, notification);
+        Notification.Builder builder = Build.VERSION.SDK_INT >= 26
+                ? new Notification.Builder(this, CHANNEL_ID)
+                : new Notification.Builder(this);
+        Notification notification = builder
+                .setContentTitle("Cam Live")
+                .setContentText("Camera flottante active")
+                .setSmallIcon(android.R.drawable.presence_video_online)
+                .setOngoing(true)
+                .build();
+        if (Build.VERSION.SDK_INT >= 29) {
+            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA);
+        } else {
+            startForeground(NOTIFICATION_ID, notification);
+        }
     }
 
     private void buildOverlay() {
         widthPx = dp(170);
         heightPx = dp(230);
+        cameraRotation = 0;
         windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
+
         overlay = new FrameLayout(this);
         overlay.setBackgroundColor(Color.BLACK);
         overlay.setPadding(dp(1), dp(1), dp(1), dp(1));
@@ -112,20 +127,24 @@ public class CamOverlayV2 extends Service {
         overlay.addView(column, new FrameLayout.LayoutParams(-1, -1));
 
         preview = new TextureView(this);
+        preview.setOpaque(true);
         column.addView(preview, new LinearLayout.LayoutParams(-1, 0, 1f));
 
         controlsBar = new LinearLayout(this);
         controlsBar.setOrientation(LinearLayout.HORIZONTAL);
         controlsBar.setGravity(Gravity.CENTER);
-        controlsBar.setBackgroundColor(0xee101018);
+        controlsBar.setBackgroundColor(0xf0101018);
         controlsBar.setPadding(dp(2), dp(2), dp(2), dp(2));
-        column.addView(controlsBar, new LinearLayout.LayoutParams(-1, dp(38)));
+        column.addView(controlsBar, new LinearLayout.LayoutParams(-1, dp(40)));
 
         pauseButton = control("Pause");
+        TextView rotate = control("↻");
         TextView minus = control("-");
         TextView plus = control("+");
         TextView stop = control("Stop");
+
         controlsBar.addView(pauseButton);
+        controlsBar.addView(rotate);
         controlsBar.addView(minus);
         controlsBar.addView(plus);
         controlsBar.addView(stop);
@@ -139,26 +158,74 @@ public class CamOverlayV2 extends Service {
         badge.setPadding(dp(6), dp(4), dp(6), dp(4));
         overlay.addView(badge, new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.LEFT));
 
-        int type = Build.VERSION.SDK_INT >= 26 ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY : WindowManager.LayoutParams.TYPE_PHONE;
-        params = new WindowManager.LayoutParams(widthPx, heightPx, type, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN, android.graphics.PixelFormat.TRANSLUCENT);
+        int type = Build.VERSION.SDK_INT >= 26
+                ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                : WindowManager.LayoutParams.TYPE_PHONE;
+        params = new WindowManager.LayoutParams(
+                widthPx,
+                heightPx,
+                type,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE |
+                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                android.graphics.PixelFormat.TRANSLUCENT
+        );
         params.gravity = Gravity.TOP | Gravity.LEFT;
         params.x = dp(12);
         params.y = dp(72);
 
         setDrag(preview);
         setDrag(badge);
-        pauseButton.setOnClickListener(v -> { showControlsTemporarily(); togglePause(); });
-        minus.setOnClickListener(v -> { showControlsTemporarily(); resize(-dp(28)); });
-        minus.setOnLongClickListener(v -> { showControlsTemporarily(); setMiniSize(); return true; });
-        plus.setOnClickListener(v -> { showControlsTemporarily(); resize(dp(28)); });
-        stop.setOnClickListener(v -> { showControlsTemporarily(); stopAction(); });
+
+        pauseButton.setOnClickListener(v -> {
+            showControlsTemporarily();
+            togglePause();
+        });
+        rotate.setOnClickListener(v -> {
+            showControlsTemporarily();
+            rotateCamera();
+        });
+        rotate.setOnLongClickListener(v -> {
+            showControlsTemporarily();
+            resetCameraRotation();
+            return true;
+        });
+        minus.setOnClickListener(v -> {
+            showControlsTemporarily();
+            resize(-dp(28));
+        });
+        minus.setOnLongClickListener(v -> {
+            showControlsTemporarily();
+            setMiniSize();
+            return true;
+        });
+        plus.setOnClickListener(v -> {
+            showControlsTemporarily();
+            resize(dp(28));
+        });
+        stop.setOnClickListener(v -> {
+            showControlsTemporarily();
+            stopAction();
+        });
 
         preview.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
-            @Override public void onSurfaceTextureAvailable(SurfaceTexture surface, int width, int height) { openCamera(surface); }
-            @Override public void onSurfaceTextureSizeChanged(SurfaceTexture surface, int width, int height) {}
-            @Override public boolean onSurfaceTextureDestroyed(SurfaceTexture surface) { closeCamera(); return true; }
-            @Override public void onSurfaceTextureUpdated(SurfaceTexture surface) {}
+            @Override
+            public void onSurfaceTextureAvailable(SurfaceTexture surface, int width, int height) {
+                openCamera(surface);
+            }
+
+            @Override
+            public void onSurfaceTextureSizeChanged(SurfaceTexture surface, int width, int height) {}
+
+            @Override
+            public boolean onSurfaceTextureDestroyed(SurfaceTexture surface) {
+                closeCamera();
+                return true;
+            }
+
+            @Override
+            public void onSurfaceTextureUpdated(SurfaceTexture surface) {}
         });
+
         windowManager.addView(overlay, params);
     }
 
@@ -166,11 +233,12 @@ public class CamOverlayV2 extends Service {
         TextView view = new TextView(this);
         view.setText(text);
         view.setTextColor(Color.WHITE);
-        view.setTextSize(12);
+        view.setTextSize(11);
         view.setGravity(Gravity.CENTER);
         view.setBackgroundColor(0xff333846);
+        view.setPadding(dp(2), 0, dp(2), 0);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -1, 1f);
-        lp.setMargins(dp(2), 0, dp(2), 0);
+        lp.setMargins(dp(1), 0, dp(1), 0);
         view.setLayoutParams(lp);
         return view;
     }
@@ -212,12 +280,15 @@ public class CamOverlayV2 extends Service {
     }
 
     private void refreshBadge() {
-        SharedPreferences p = getSharedPreferences(ScreenRecordService.PREFS, MODE_PRIVATE);
-        boolean active = p.getBoolean(ScreenRecordService.KEY_RECORDING_ACTIVE, false);
-        boolean paused = p.getBoolean(ScreenRecordService.KEY_RECORDING_PAUSED, false);
-        long elapsed = p.getLong(ScreenRecordService.KEY_RECORDING_ELAPSED_MS, 0L);
-        long started = p.getLong(ScreenRecordService.KEY_RECORDING_STARTED_AT, 0L);
-        if (active && !paused && started > 0) elapsed += System.currentTimeMillis() - started;
+        SharedPreferences prefs = getSharedPreferences(ScreenRecordService.PREFS, MODE_PRIVATE);
+        boolean active = prefs.getBoolean(ScreenRecordService.KEY_RECORDING_ACTIVE, false);
+        boolean paused = prefs.getBoolean(ScreenRecordService.KEY_RECORDING_PAUSED, false);
+        long elapsed = prefs.getLong(ScreenRecordService.KEY_RECORDING_ELAPSED_MS, 0L);
+        long started = prefs.getLong(ScreenRecordService.KEY_RECORDING_STARTED_AT, 0L);
+        if (active && !paused && started > 0L) {
+            elapsed += System.currentTimeMillis() - started;
+        }
+
         if (active) {
             badge.setText((paused ? "PAUSE " : "REC ") + time(elapsed));
             badge.setBackgroundColor(paused ? 0xccff9800 : 0xccd50000);
@@ -230,18 +301,19 @@ public class CamOverlayV2 extends Service {
     }
 
     private String time(long ms) {
-        long s = Math.max(0, ms / 1000);
-        return String.format(Locale.FRANCE, "%02d:%02d", s / 60, s % 60);
+        long seconds = Math.max(0, ms / 1000);
+        return String.format(Locale.FRANCE, "%02d:%02d", seconds / 60, seconds % 60);
     }
 
     private boolean recordingActive() {
-        return getSharedPreferences(ScreenRecordService.PREFS, MODE_PRIVATE).getBoolean(ScreenRecordService.KEY_RECORDING_ACTIVE, false);
+        return getSharedPreferences(ScreenRecordService.PREFS, MODE_PRIVATE)
+                .getBoolean(ScreenRecordService.KEY_RECORDING_ACTIVE, false);
     }
 
     private void togglePause() {
         if (!recordingActive()) return;
-        SharedPreferences p = getSharedPreferences(ScreenRecordService.PREFS, MODE_PRIVATE);
-        boolean paused = p.getBoolean(ScreenRecordService.KEY_RECORDING_PAUSED, false);
+        SharedPreferences prefs = getSharedPreferences(ScreenRecordService.PREFS, MODE_PRIVATE);
+        boolean paused = prefs.getBoolean(ScreenRecordService.KEY_RECORDING_PAUSED, false);
         Intent intent = new Intent(this, ScreenRecordService.class);
         intent.setAction(paused ? ScreenRecordService.ACTION_RESUME : ScreenRecordService.ACTION_PAUSE);
         startService(intent);
@@ -256,17 +328,47 @@ public class CamOverlayV2 extends Service {
         stopSelf();
     }
 
+    private void rotateCamera() {
+        cameraRotation = (cameraRotation + 90) % 360;
+        preview.setRotation(cameraRotation);
+        swapOverlayDimensions();
+    }
+
+    private void resetCameraRotation() {
+        if (cameraRotation == 90 || cameraRotation == 270) {
+            swapOverlayDimensions();
+        }
+        cameraRotation = 0;
+        preview.setRotation(0f);
+    }
+
+    private void swapOverlayDimensions() {
+        int oldWidth = widthPx;
+        widthPx = heightPx;
+        heightPx = oldWidth;
+        params.width = widthPx;
+        params.height = heightPx;
+        windowManager.updateViewLayout(overlay, params);
+    }
+
     private void resize(int delta) {
-        widthPx = Math.max(dp(88), Math.min(dp(360), widthPx + delta));
-        heightPx = Math.max(dp(120), Math.min(dp(485), heightPx + (int) (delta * 1.35f)));
+        boolean landscape = cameraRotation == 90 || cameraRotation == 270;
+        int minWidth = landscape ? dp(120) : dp(88);
+        int minHeight = landscape ? dp(88) : dp(120);
+        int maxWidth = landscape ? dp(485) : dp(360);
+        int maxHeight = landscape ? dp(360) : dp(485);
+
+        widthPx = Math.max(minWidth, Math.min(maxWidth, widthPx + delta));
+        heightPx = Math.max(minHeight, Math.min(maxHeight, heightPx + (int) (delta * 1.35f)));
         params.width = widthPx;
         params.height = heightPx;
         windowManager.updateViewLayout(overlay, params);
     }
 
     private void setMiniSize() {
-        widthPx = dp(88);
-        heightPx = dp(120);
+        boolean landscape = cameraRotation == 90 || cameraRotation == 270;
+        widthPx = landscape ? dp(120) : dp(88);
+        heightPx = landscape ? dp(88) : dp(120);
         params.width = widthPx;
         params.height = heightPx;
         windowManager.updateViewLayout(overlay, params);
@@ -281,13 +383,25 @@ public class CamOverlayV2 extends Service {
     private void openCamera(SurfaceTexture texture) {
         try {
             CameraManager manager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
-            String id = frontCameraId(manager);
-            if (id == null) return;
+            String cameraId = frontCameraId(manager);
+            if (cameraId == null) return;
             texture.setDefaultBufferSize(720, 960);
-            manager.openCamera(id, new CameraDevice.StateCallback() {
-                @Override public void onOpened(CameraDevice camera) { cameraDevice = camera; startPreview(texture); }
-                @Override public void onDisconnected(CameraDevice camera) { camera.close(); }
-                @Override public void onError(CameraDevice camera, int error) { camera.close(); }
+            manager.openCamera(cameraId, new CameraDevice.StateCallback() {
+                @Override
+                public void onOpened(CameraDevice camera) {
+                    cameraDevice = camera;
+                    startPreview(texture);
+                }
+
+                @Override
+                public void onDisconnected(CameraDevice camera) {
+                    camera.close();
+                }
+
+                @Override
+                public void onError(CameraDevice camera, int error) {
+                    camera.close();
+                }
             }, cameraHandler);
         } catch (SecurityException | CameraAccessException e) {
             e.printStackTrace();
@@ -297,7 +411,9 @@ public class CamOverlayV2 extends Service {
     private String frontCameraId(CameraManager manager) throws CameraAccessException {
         for (String id : manager.getCameraIdList()) {
             Integer facing = manager.getCameraCharacteristics(id).get(CameraCharacteristics.LENS_FACING);
-            if (facing != null && facing == CameraCharacteristics.LENS_FACING_FRONT) return id;
+            if (facing != null && facing == CameraCharacteristics.LENS_FACING_FRONT) {
+                return id;
+            }
         }
         return null;
     }
@@ -307,28 +423,47 @@ public class CamOverlayV2 extends Service {
             Surface surface = new Surface(texture);
             CaptureRequest.Builder builder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
             builder.addTarget(surface);
-            cameraDevice.createCaptureSession(Collections.singletonList(surface), new CameraCaptureSession.StateCallback() {
-                @Override public void onConfigured(CameraCaptureSession configured) {
-                    session = configured;
-                    try { session.setRepeatingRequest(builder.build(), null, cameraHandler); } catch (CameraAccessException e) { e.printStackTrace(); }
-                }
-                @Override public void onConfigureFailed(CameraCaptureSession failed) {}
-            }, cameraHandler);
+            cameraDevice.createCaptureSession(
+                    Collections.singletonList(surface),
+                    new CameraCaptureSession.StateCallback() {
+                        @Override
+                        public void onConfigured(CameraCaptureSession configured) {
+                            session = configured;
+                            try {
+                                session.setRepeatingRequest(builder.build(), null, cameraHandler);
+                            } catch (CameraAccessException e) {
+                                e.printStackTrace();
+                            }
+                        }
+
+                        @Override
+                        public void onConfigureFailed(CameraCaptureSession failed) {}
+                    },
+                    cameraHandler
+            );
         } catch (CameraAccessException e) {
             e.printStackTrace();
         }
     }
 
     private void closeCamera() {
-        try { if (session != null) session.close(); } catch (Exception ignored) {}
-        try { if (cameraDevice != null) cameraDevice.close(); } catch (Exception ignored) {}
+        try {
+            if (session != null) session.close();
+        } catch (Exception ignored) {}
+        try {
+            if (cameraDevice != null) cameraDevice.close();
+        } catch (Exception ignored) {}
         session = null;
         cameraDevice = null;
     }
 
     private void createChannel() {
         if (Build.VERSION.SDK_INT >= 26) {
-            NotificationChannel channel = new NotificationChannel(CHANNEL_ID, "Cam Live Camera V2", NotificationManager.IMPORTANCE_LOW);
+            NotificationChannel channel = new NotificationChannel(
+                    CHANNEL_ID,
+                    "Cam Live Camera V2",
+                    NotificationManager.IMPORTANCE_LOW
+            );
             NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
             manager.createNotificationChannel(channel);
         }
@@ -342,13 +477,21 @@ public class CamOverlayV2 extends Service {
         }
         closeCamera();
         if (windowManager != null && overlay != null) {
-            try { windowManager.removeView(overlay); } catch (Exception ignored) {}
+            try {
+                windowManager.removeView(overlay);
+            } catch (Exception ignored) {}
         }
         if (cameraThread != null) cameraThread.quitSafely();
         stopForeground(true);
         super.onDestroy();
     }
 
-    @Override public IBinder onBind(Intent intent) { return null; }
-    private int dp(float v) { return (int) (v * getResources().getDisplayMetrics().density + 0.5f); }
+    @Override
+    public IBinder onBind(Intent intent) {
+        return null;
+    }
+
+    private int dp(float value) {
+        return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
+    }
 }
